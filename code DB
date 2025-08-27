@@ -1,0 +1,683 @@
+-- PWA Database Schema (Backoffice & Mobile)
+-- Versione: Deploy-ready con username e sicurezza login
+-- Database: PostgreSQL >= 13
+
+-- ====================================
+-- 0) ESTENSIONI
+-- ====================================
+CREATE EXTENSION IF NOT EXISTS pgcrypto; -- gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements; -- telemetria/monitoring (opzionale)
+
+-- ====================================
+-- 1) TABELLE CORE
+-- ====================================
+
+-- 1.1 Aziende (tenant)
+CREATE TABLE companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nome VARCHAR(255) NOT NULL,
+    activation_code VARCHAR(50) UNIQUE,
+    partita_iva VARCHAR(20),
+    codice_fiscale VARCHAR(20),
+    country_code CHAR(2),
+    indirizzo VARCHAR(255),
+    citta VARCHAR(100),
+    cap VARCHAR(20),
+    provincia VARCHAR(50),
+    telefono VARCHAR(30),
+    email_amministrativa VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 1.2 Utenti (con username aggiunto)
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    activation_code_id UUID,
+    nome VARCHAR(255),
+    cognome VARCHAR(255),
+    username VARCHAR(100) UNIQUE, -- NUOVO CAMPO
+    ruolo VARCHAR(20) NOT NULL CHECK (ruolo IN ('admin', 'supervisore', 'operaio')),
+    email VARCHAR(255),
+    password_hash VARCHAR(255),
+    status VARCHAR(20) NOT NULL CHECK (status IN ('attivo', 'disattivato', 'eliminato')) DEFAULT 'attivo',
+    onboarded BOOLEAN NOT NULL DEFAULT FALSE,
+    last_login TIMESTAMP,
+    login_attempts INT DEFAULT 0 CHECK (login_attempts >= 0), -- NUOVO: tentativi login falliti
+    account_locked_until TIMESTAMP, -- NUOVO: blocco temporaneo account
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(email),
+    UNIQUE(username)
+);
+
+-- 1.3 Codici di attivazione
+CREATE TABLE activation_codes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    code VARCHAR(11) NOT NULL UNIQUE,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('supervisore', 'operaio')),
+    worker_name VARCHAR(255),
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('attivo', 'utilizzato', 'scaduto')) DEFAULT 'attivo',
+    CONSTRAINT activation_codes_code_format_chk CHECK (code ~ '^[A-Z0-9]{3}-[A-Z0-9]{3}-[A-Z0-9]{3}$')
+);
+
+-- Aggiungi foreign key per activation_code_id
+ALTER TABLE users ADD CONSTRAINT fk_users_activation_code FOREIGN KEY (activation_code_id) REFERENCES activation_codes(id) ON DELETE SET NULL;
+
+-- Requisiti credenziali per ruoli
+ALTER TABLE users ADD CONSTRAINT role_requirements CHECK (
+    (ruolo = 'operaio' AND email IS NULL AND password_hash IS NULL AND username IS NULL) OR
+    (ruolo IN ('admin','supervisore') AND email IS NOT NULL AND password_hash IS NOT NULL AND username IS NOT NULL)
+);
+
+CREATE INDEX idx_users_company ON users(company_id);
+CREATE UNIQUE INDEX idx_users_activation_code_unique ON users(activation_code_id) WHERE activation_code_id IS NOT NULL;
+
+-- 1.4 Token (JWT/refresh) + info device
+CREATE TABLE user_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    jwt_token_id VARCHAR(255) NOT NULL,
+    valid BOOLEAN NOT NULL DEFAULT TRUE,
+    device_id VARCHAR(256),
+    long_term_token BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_user_tokens_lookup ON user_tokens(user_id, jwt_token_id, valid);
+CREATE UNIQUE INDEX unique_valid_token_per_user ON user_tokens(user_id) WHERE valid = TRUE;
+
+-- 1.5 Progetti (cantieri)
+CREATE TABLE projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    nome VARCHAR(255) NOT NULL,
+    status VARCHAR(20) CHECK (status IN ('attivo', 'completato', 'archiviato')) DEFAULT 'attivo',
+    fine_prevista TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (company_id, nome)
+);
+
+CREATE INDEX idx_projects_company_id ON projects(company_id);
+
+-- 1.6 Supervisori per progetto
+CREATE TABLE project_supervisors (
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (project_id, user_id)
+);
+
+-- 1.7 Ore lavorate
+CREATE TABLE work_hours (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id),
+    user_id UUID NOT NULL REFERENCES users(id),
+    inserito_da UUID REFERENCES users(id),
+    data DATE NOT NULL,
+    ore_totali NUMERIC(4,2) NOT NULL CHECK (ore_totali BETWEEN 0 AND 24),
+    is_festivo BOOLEAN NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, user_id, data)
+);
+
+CREATE INDEX idx_work_hours_project_date ON work_hours(project_id, data);
+CREATE INDEX idx_work_hours_festivo ON work_hours(is_festivo);
+CREATE INDEX idx_work_hours_user_date ON work_hours(user_id, data);
+
+-- 1.8 Foto (con note)
+CREATE TABLE photos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id),
+    user_id UUID NOT NULL REFERENCES users(id),
+    inserito_da UUID REFERENCES users(id),
+    taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    url TEXT NOT NULL,
+    status VARCHAR(20) DEFAULT 'attivo' CHECK (status IN ('attivo', 'archiviato')),
+    note TEXT
+);
+
+CREATE INDEX idx_photos_project_taken ON photos(project_id, taken_at);
+
+-- 1.9 Fatture
+CREATE TABLE invoices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    project_id UUID REFERENCES projects(id),
+    cliente_nome VARCHAR(255) NOT NULL,
+    importo_dovuto NUMERIC(10,2) NOT NULL CHECK (importo_dovuto > 0),
+    importo_pagato NUMERIC(10,2) DEFAULT 0,
+    pagata BOOLEAN DEFAULT FALSE,
+    data_scadenza DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'attivo' CHECK (status IN ('attivo', 'annullata')),
+    CHECK (importo_pagato <= importo_dovuto)
+);
+
+CREATE INDEX idx_invoices_project_scadenza ON invoices(project_id, data_scadenza);
+
+-- 1.10 Festività (per azienda)
+CREATE TABLE holidays (
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    PRIMARY KEY (company_id, date)
+);
+
+-- 1.11 Log attività applicative
+CREATE TABLE activity_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id),
+    action_type VARCHAR(50) NOT NULL,
+    table_name VARCHAR(50) NOT NULL,
+    record_id UUID NOT NULL,
+    old_value JSONB,
+    new_value JSONB,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 1.12 Workflow correzioni ore
+CREATE TABLE time_correction_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id),
+    project_id UUID NOT NULL REFERENCES projects(id),
+    correction_date DATE NOT NULL,
+    original_hours NUMERIC(4,2) NOT NULL,
+    requested_hours NUMERIC(4,2) NOT NULL CHECK (requested_hours BETWEEN 0 AND 24),
+    reason TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    reviewed_by UUID REFERENCES users(id),
+    reviewed_at TIMESTAMPTZ
+);
+
+CREATE TABLE time_correction_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    request_id UUID NOT NULL REFERENCES time_correction_requests(id) ON DELETE CASCADE,
+    work_hours_id UUID REFERENCES work_hours(id),
+    old_hours NUMERIC(4,2),
+    new_hours NUMERIC(4,2) NOT NULL,
+    corrected_by UUID NOT NULL REFERENCES users(id),
+    corrected_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 1.13 Storico export (PDF/XLSX)
+CREATE TABLE export_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    export_type VARCHAR(20) NOT NULL CHECK (export_type IN ('pdf','xlsx','csv','json')),
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id UUID,
+    filter_params JSONB,
+    file_url TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 1.14 Sicurezza accessi
+CREATE TABLE failed_logins (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username_attempted VARCHAR(255) NOT NULL,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    ip_address INET NOT NULL,
+    user_agent TEXT,
+    timestamp TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE password_resets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(128) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    used BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX idx_password_resets_user ON password_resets(user_id);
+CREATE INDEX idx_password_resets_expiry ON password_resets(expires_at) WHERE NOT used;
+
+-- ====================================
+-- 2) AUDIT LOG (partizionato)
+-- ====================================
+
+-- 2.1 Tabella partizionata per serie temporali
+CREATE TABLE audit_log (
+    id UUID DEFAULT gen_random_uuid(),
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    user_id UUID,
+    company_id UUID,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id UUID NOT NULL,
+    operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT','UPDATE','DELETE')),
+    old_value JSONB,
+    new_value JSONB,
+    PRIMARY KEY (id, timestamp)
+) PARTITION BY RANGE (timestamp);
+
+-- Partizione anno corrente
+DO $$
+DECLARE
+    y INT := EXTRACT(YEAR FROM NOW())::INT;
+    start_ts TIMESTAMPTZ := make_timestamp(y,1,1,0,0,0);
+    end_ts TIMESTAMPTZ := make_timestamp(y+1,1,1,0,0,0);
+    part_name TEXT := format('audit_log_%s', y);
+BEGIN
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS %I PARTITION OF audit_log FOR VALUES FROM (%L) TO (%L);',
+        part_name, start_ts, end_ts
+    );
+END$$;
+
+-- Indici
+CREATE INDEX IF NOT EXISTS idx_audit_entity_btree ON audit_log(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp_brin ON audit_log USING BRIN(timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_old_gin ON audit_log USING GIN(old_value);
+CREATE INDEX IF NOT EXISTS idx_audit_new_gin ON audit_log USING GIN(new_value);
+
+-- 2.2 Funzione trigger generica
+CREATE OR REPLACE FUNCTION log_entity_changes()
+RETURNS TRIGGER AS $$
+DECLARE
+    current_user_id UUID := NULLIF(current_setting('app.current_user_id', true), '')::UUID;
+    resolved_company UUID;
+BEGIN
+    resolved_company := COALESCE(
+        COALESCE(NEW.company_id, OLD.company_id),
+        (SELECT company_id FROM projects p WHERE p.id = COALESCE(NEW.project_id, OLD.project_id)),
+        NULL
+    );
+
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO audit_log (user_id, company_id, entity_type, entity_id, operation, new_value)
+        VALUES (current_user_id, resolved_company, TG_TABLE_NAME, NEW.id, 'INSERT', to_jsonb(NEW));
+        RETURN NEW;
+    ELSIF TG_OP = 'UPDATE' THEN
+        INSERT INTO audit_log (user_id, company_id, entity_type, entity_id, operation, old_value, new_value)
+        VALUES (current_user_id, resolved_company, TG_TABLE_NAME, NEW.id, 'UPDATE', to_jsonb(OLD), to_jsonb(NEW));
+        RETURN NEW;
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO audit_log (user_id, company_id, entity_type, entity_id, operation, old_value)
+        VALUES (current_user_id, resolved_company, TG_TABLE_NAME, OLD.id, 'DELETE', to_jsonb(OLD));
+        RETURN OLD;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 2.3 Trigger di audit
+CREATE TRIGGER trg_audit_users AFTER INSERT OR UPDATE OR DELETE ON users FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
+CREATE TRIGGER trg_audit_projects AFTER INSERT OR UPDATE OR DELETE ON projects FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
+CREATE TRIGGER trg_audit_work_hours AFTER INSERT OR UPDATE OR DELETE ON work_hours FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
+CREATE TRIGGER trg_audit_photos AFTER INSERT OR UPDATE OR DELETE ON photos FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
+CREATE TRIGGER trg_audit_invoices AFTER INSERT OR UPDATE OR DELETE ON invoices FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
+CREATE TRIGGER trg_audit_time_corrections AFTER INSERT OR UPDATE OR DELETE ON time_correction_requests FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
+
+-- ====================================
+-- 3) FUNZIONI E TRIGGER BUSINESS
+-- ====================================
+
+-- 3.1 Aggiorna flag fattura pagata
+CREATE OR REPLACE FUNCTION update_invoice_status()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.pagata := (NEW.importo_pagato >= NEW.importo_dovuto);
+    RETURN NEW;
+EXCEPTION WHEN others THEN
+    RAISE EXCEPTION 'Errore aggiornamento stato fattura ID %: %', NEW.id, SQLERRM;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_invoice_status BEFORE INSERT OR UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION update_invoice_status();
+
+-- 3.2 Precalcolo festivi su work_hours
+CREATE OR REPLACE FUNCTION precompute_holiday()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.is_festivo := (
+        EXTRACT(DOW FROM NEW.data) = 6 OR
+        EXTRACT(DOW FROM NEW.data) = 0 OR
+        EXISTS (
+            SELECT 1 FROM holidays h
+            WHERE h.date = NEW.data AND h.company_id = NEW.company_id
+        )
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_precompute_holiday BEFORE INSERT ON work_hours FOR EACH ROW EXECUTE FUNCTION precompute_holiday();
+
+-- 3.3 Pulizia codici scaduti
+CREATE OR REPLACE FUNCTION clean_expired_activation_codes()
+RETURNS VOID AS $$
+BEGIN
+    UPDATE activation_codes
+    SET status = 'scaduto'
+    WHERE status = 'attivo' AND expires_at < NOW();
+END;
+$$ LANGUAGE plpgsql;
+
+-- 3.4 NOTIFY per richieste correzione
+CREATE OR REPLACE FUNCTION notify_supervisors_of_correction_request()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify(
+        'correction_request_channel',
+        json_build_object(
+            'request_id', NEW.id,
+            'user_id', NEW.user_id,
+            'project_id', NEW.project_id,
+            'status', NEW.status
+        )::text
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_notify_correction_request AFTER INSERT OR UPDATE ON time_correction_requests FOR EACH ROW EXECUTE FUNCTION notify_supervisors_of_correction_request();
+
+-- 3.5 Funzione per consumare codice attivazione e creare utente
+CREATE OR REPLACE FUNCTION consume_activation_code_and_create_user(
+    p_code TEXT,
+    p_nome TEXT,
+    p_cognome TEXT,
+    p_username TEXT, -- NUOVO PARAMETRO
+    p_email TEXT,
+    p_password_hash TEXT
+)
+RETURNS TABLE(success BOOLEAN, user_id UUID, message TEXT) AS $$
+DECLARE
+    v_code activation_codes%ROWTYPE;
+    v_user_id UUID;
+BEGIN
+    -- Verifica e lock del codice
+    SELECT * INTO v_code
+    FROM activation_codes
+    WHERE code = p_code AND status = 'attivo' AND expires_at > NOW()
+    FOR UPDATE SKIP LOCKED;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT false, NULL, 'Codice non valido o scaduto';
+        RETURN;
+    END IF;
+
+    -- Validazioni per ruolo
+    IF v_code.role = 'operaio' THEN
+        IF p_email IS NOT NULL OR p_password_hash IS NOT NULL OR p_username IS NOT NULL THEN
+            RETURN QUERY SELECT false, NULL, 'Gli operai non devono impostare email, password o username in attivazione';
+            RETURN;
+        END IF;
+    ELSIF v_code.role = 'supervisore' THEN
+        IF p_email IS NULL OR p_password_hash IS NULL OR p_username IS NULL THEN
+            RETURN QUERY SELECT false, NULL, 'Email, username e password sono obbligatorie per i supervisori';
+            RETURN;
+        END IF;
+    ELSE
+        RETURN QUERY SELECT false, NULL, 'Ruolo non supportato: ' || v_code.role;
+        RETURN;
+    END IF;
+
+    -- Inserimento utente collegato al codice
+    v_user_id := gen_random_uuid();
+    
+    INSERT INTO users (
+        id, company_id, activation_code_id, nome, cognome, username,
+        ruolo, email, password_hash, status, onboarded
+    ) VALUES (
+        v_user_id, v_code.company_id, v_code.id,
+        COALESCE(p_nome, v_code.worker_name), p_cognome, p_username,
+        CASE WHEN v_code.role = 'operaio' THEN 'operaio' ELSE 'supervisore' END,
+        p_email, p_password_hash, 'attivo', TRUE
+    );
+
+    -- Marca il codice come utilizzato
+    UPDATE activation_codes SET status = 'utilizzato' WHERE id = v_code.id;
+
+    RETURN QUERY SELECT true, v_user_id, 'Utente creato con successo';
+EXCEPTION WHEN others THEN
+    RETURN QUERY SELECT false, NULL, 'Errore durante la creazione utente: ' || SQLERRM;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 3.6 Funzioni per gestione sicurezza login
+CREATE OR REPLACE FUNCTION handle_failed_login(p_username VARCHAR)
+RETURNS TABLE(is_locked BOOLEAN, attempts_left INT, lock_until TIMESTAMP) AS $$
+DECLARE
+    v_user users%ROWTYPE;
+    v_lock_duration INTERVAL := '30 minutes';
+BEGIN
+    -- Trova l'utente per username
+    SELECT * INTO v_user FROM users WHERE username = p_username;
+    
+    IF NOT FOUND THEN
+        -- Registra il tentativo fallito anche per utenti inesistenti
+        INSERT INTO failed_logins (username_attempted, ip_address, user_agent)
+        VALUES (p_username, INET '0.0.0.0', 'Unknown');
+        RETURN QUERY SELECT false, 0, NULL;
+        RETURN;
+    END IF;
+    
+    -- Se l'account è già bloccato, restituisci lo stato
+    IF v_user.account_locked_until IS NOT NULL AND v_user.account_locked_until > NOW() THEN
+        RETURN QUERY SELECT true, 0, v_user.account_locked_until;
+        RETURN;
+    END IF;
+    
+    -- Sblocca l'account se il periodo di blocco è terminato
+    IF v_user.account_locked_until IS NOT NULL AND v_user.account_locked_until <= NOW() THEN
+        UPDATE users 
+        SET login_attempts = 0, account_locked_until = NULL 
+        WHERE id = v_user.id;
+        
+        v_user.login_attempts := 0;
+        v_user.account_locked_until := NULL;
+    END IF;
+    
+    -- Aggiorna il conteggio dei tentativi falliti
+    UPDATE users 
+    SET 
+        login_attempts = login_attempts + 1,
+        account_locked_until = CASE 
+            WHEN login_attempts + 1 >= 5 THEN NOW() + v_lock_duration 
+            ELSE account_locked_until 
+        END
+    WHERE id = v_user.id
+    RETURNING login_attempts, account_locked_into v_user.login_attempts, v_user.account_locked_until;
+    
+    -- Registra il tentativo fallito
+    INSERT INTO failed_logins (username_attempted, user_id, ip_address, user_agent)
+    VALUES (p_username, v_user.id, INET '0.0.0.0', 'Unknown');
+    
+    -- Restituisci lo stato
+    RETURN QUERY SELECT 
+        (v_user.login_attempts >= 5),
+        GREATEST(0, 5 - v_user.login_attempts),
+        v_user.account_locked_until;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION reset_login_attempts(p_user_id UUID)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE users 
+    SET login_attempts = 0, account_locked_until = NULL 
+    WHERE id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION unlock_user_account(p_user_id UUID)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE users 
+    SET login_attempts = 0, account_locked_until = NULL 
+    WHERE id = p_user_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger per controllo tentativi di login
+CREATE OR REPLACE FUNCTION check_failed_login_attempts()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_attempts INT;
+BEGIN
+    -- Se abbiamo un user_id, controlliamo i tentativi
+    IF NEW.user_id IS NOT NULL THEN
+        SELECT login_attempts INTO v_attempts 
+        FROM users 
+        WHERE id = NEW.user_id;
+        
+        IF v_attempts >= 4 THEN  -- 4 tentativi precedenti + questo = 5
+            UPDATE users 
+            SET account_locked_until = NOW() + INTERVAL '30 minutes'
+            WHERE id = NEW.user_id;
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_check_failed_login_attempts
+AFTER INSERT ON failed_logins
+FOR EACH ROW
+EXECUTE FUNCTION check_failed_login_attempts();
+
+-- ====================================
+-- 4) VISTE
+-- ====================================
+
+-- 4.1 Saldo fatture
+CREATE OR REPLACE VIEW invoices_balance AS
+SELECT i.*, (i.importo_dovuto - i.importo_pagato) AS residuo
+FROM invoices i;
+
+-- 4.2 Utenti attivi (ultimi 30 giorni)
+CREATE OR REPLACE VIEW active_users_report AS
+SELECT company_id, COUNT(DISTINCT user_id) AS active_users
+FROM work_hours
+WHERE data BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE
+GROUP BY company_id;
+
+-- ====================================
+-- 5) RLS (Row Level Security)
+-- ====================================
+
+-- Abilita RLS sulle tabelle multi-tenant
+ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_supervisors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_hours ENABLE ROW LEVEL SECURITY;
+ALTER TABLE photos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE holidays ENABLE ROW LEVEL SECURITY;
+ALTER TABLE time_correction_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE time_correction_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE export_history ENABLE ROW LEVEL SECURITY;
+
+-- Policy per companies
+CREATE POLICY companies_isolation_policy ON companies USING (id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per users
+CREATE POLICY users_isolation_policy ON users USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per activation_codes
+CREATE POLICY activation_codes_isolation_policy ON activation_codes USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per user_tokens
+CREATE POLICY user_tokens_isolation_policy ON user_tokens USING (
+    user_id IN (
+        SELECT u.id FROM users u
+        WHERE u.company_id = current_setting('app.current_company_id')::UUID
+        AND u.id = user_tokens.user_id
+    )
+);
+
+-- Policy per projects
+CREATE POLICY projects_isolation_policy ON projects USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per project_supervisors
+CREATE POLICY project_supervisors_isolation_policy ON project_supervisors USING (
+    (SELECT p.company_id FROM projects p WHERE p.id = project_id) = current_setting('app.current_company_id')::UUID
+);
+
+-- Policy per work_hours
+CREATE POLICY work_hours_isolation_policy ON work_hours USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per photos
+CREATE POLICY photos_isolation_policy ON photos USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per invoices
+CREATE POLICY invoices_isolation_policy ON invoices USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per holidays
+CREATE POLICY holidays_isolation_policy ON holidays USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per time_correction_requests
+CREATE POLICY tcr_isolation_policy ON time_correction_requests USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per time_correction_history
+CREATE POLICY tch_isolation_policy ON time_correction_history USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per export_history
+CREATE POLICY export_history_isolation_policy ON export_history USING (company_id = current_setting('app.current_company_id')::UUID);
+
+-- Policy per failed_logins
+CREATE POLICY failed_logins_isolation_policy ON failed_logins USING (
+    user_id IN (
+        SELECT u.id FROM users u
+        WHERE u.company_id = current_setting('app.current_company_id')::UUID
+        AND u.id = failed_logins.user_id
+    ) OR user_id IS NULL
+);
+
+-- ====================================
+-- 6) COMMENTI (documentazione inline)
+-- ====================================
+
+COMMENT ON TABLE companies IS 'Tenant multi-azienda. Ogni record identifica un''azienda.';
+COMMENT ON COLUMN users.onboarded IS 'TRUE quando l''utente ha completato il primo accesso/attivazione.';
+COMMENT ON COLUMN users.username IS 'Nome utente univoco per l''accesso al sistema. Obbligatorio per admin e supervisori, NULL per operai.';
+COMMENT ON COLUMN users.login_attempts IS 'Numero di tentativi di login falliti consecutivi. Dopo 5 tentativi, l''account viene bloccato.';
+COMMENT ON COLUMN users.account_locked_until IS 'Data e ora fino a quando l''account è bloccato dopo troppi tentativi di login falliti.';
+COMMENT ON TABLE activation_codes IS 'Codici di attivazione generati dal backoffice per supervisori/operai. Pattern XXX-XXX-XXX.';
+COMMENT ON TABLE audit_log IS 'Audit partizionato per anno. Inserimenti via trigger log_entity_changes().';
+COMMENT ON TABLE export_history IS 'Storico dei file esportati (PDF/XLSX/CSV/JSON) per timeline e audit reporting.';
+COMMENT ON FUNCTION consume_activation_code_and_create_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) IS 'Consuma un activation code e crea l''utente con ruolo coerente al codice in un''unica transazione. Ritorna user_id.';
+
+-- ====================================
+-- 7) NOTE OPERATIVE
+-- ====================================
+
+/*
+Impostare all'inizio di ogni richiesta HTTP:
+BEGIN;
+SET LOCAL app.current_company_id = '<UUID-azienda>';
+SET LOCAL app.current_user_id = '<UUID-utente>';
+-- ... query ...
+COMMIT;
+
+Per la gestione della sicurezza login:
+- Utilizzare la funzione handle_failed_login() dopo ogni tentativo fallito
+- Utilizzare reset_login_attempts() dopo ogni login riuscito
+- Implementare un meccanismo di sblocco manuale con unlock_user_account()
+*/
+
+-- ====================================
+-- 8) INDICI AGGIUNTIVI
+-- ====================================
+
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_login_attempts ON users(login_attempts);
+CREATE INDEX idx_users_account_lock ON users(account_locked_until);
+CREATE INDEX idx_failed_logins_username ON failed_logins(username_attempted);
+CREATE INDEX idx_failed_logins_timestamp ON failed_logins(timestamp);
