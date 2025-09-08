@@ -1,46 +1,44 @@
-# DB-Software-ERP-costruction
-# PWA Multi-Tenant Database
+DB-Software-ERP-Construction
+PWA Multi-Tenant Database
 
-PostgreSQL database schema designed for a multi-tenant Progressive Web App (PWA) with an administrative backoffice and mobile apps (iOS/Android).
+This project started as a personal challenge: learning how to code by building an ERP system tailored for construction SMEs.
 
-## Main Features
-- Data isolation between companies (**multi-tenancy**)
-- Row Level Security (**RLS**)
-- User activation system
-- Partitioned audit trail and activity logs
-- Correction workflow for work hours and real-time notifications
-- Optimized indexes and views for reporting
+The goal is to design a solution that is:
 
-## Requirements
-- PostgreSQL ≥ 13 (recommended 14+)
-- Extension `pgcrypto`
-- Optional extension `pg_stat_statements`
+Simple and intuitive for everyday use,
 
-## ER Diagram
-You can view the ER diagram directly via [Mermaid Live Editor](https://mermaid.live/) or by opening [`Mermaid Architecture/er-diagram.mmd`](Mermaid%20Architecture/er-diagram.mmd) (copy/paste in the editor).
+Accessible across platforms:
 
-## Documentation
+Mobile (PWA) for workers on construction sites,
 
-- [Full SQL Schema]
-- [ER Diagram (Mermaid)]
-- [Operational Notes & Best Practices]
+Desktop / Backoffice for project and company managers,
 
-## Quickstart
+Scalable and secure, with strong foundations for multi-company usage.
 
-```sql
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
--- See docs/database-schema.sql for the complete schema
-```
+I began by sketching the user experience on paper, focusing on seamless workflows. Once the main components were clear, I designed the database schema as the backbone of the system.
 
-## Operational Notes
+🔑 Main Features So Far
 
-To ensure multi-tenant security and session context, always set:
+Multi-company support (separation of data per company).
 
-```sql
-SET LOCAL app.current_company_id = '<company-UUID>';
-SET LOCAL app.current_user_id = '<user-UUID>';
-```
+User management with roles (admin, supervisor, worker) and activation codes.
 
----
+Audit and traceability (activity logs, change tracking).
 
-> See the `/docs` and `/Mermaid Architecture` folders for all technical details, PL/pgSQL functions, triggers, views, and security policies.
+Workforce management (projects, work hours, correction requests).
+
+Finance management (invoices, balances, payments).
+
+Export and reporting (data history, file generation).
+
+📌 Project Status
+
+This project is ongoing. As I continue learning and experimenting with new features, I regularly expand the schema and refine its design.
+
+It already provides a solid foundation for an ERP system, but it also serves as a learning lab — helping me explore how real-world business logic can be translated into structured, scalable software.
+
+📂 Documentation
+
+Full SQL Schema 
+
+Entity-Relationship Diagram (ERD) → Mermaid Architecture/er-diagram.mmd
