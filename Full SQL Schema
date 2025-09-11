@@ -542,6 +542,7 @@ BEGIN
     
     RETURN NEW;
 END;
+
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_check_failed_login_attempts
@@ -645,27 +646,20 @@ CREATE POLICY failed_logins_isolation_policy ON failed_logins USING (
 -- ====================================
 
 COMMENT ON TABLE companies IS 'Tenant multi-azienda. Ogni record identifica un''azienda.';
-COMMENT ON COLUMN users.onboarded IS 'TRUE quando l''utente ha completato il primo accesso/attivazione.';
-COMMENT ON COLUMN users.username IS 'Nome utente univoco per l''accesso al sistema. Obbligatorio per admin e supervisori, NULL per operai.';
-COMMENT ON COLUMN users.login_attempts IS 'Numero di tentativi di login falliti consecutivi. Dopo 5 tentativi, l''account viene bloccato.';
-COMMENT ON COLUMN users.account_locked_until IS 'Data e ora fino a quando l''account è bloccato dopo troppi tentativi di login falliti.';
+COMMENT ON COLUMN users.onboarded IS 'TRUE quando l'utente ha completato il primo accesso/attivazione.';
+COMMENT ON COLUMN users.username IS 'Nome utente univoco per l'accesso al sistema. Obbligatorio per admin e supervisori, NULL per operai.';
+COMMENT ON COLUMN users.login_attempts IS 'Numero di tentativi di login falliti consecutivi. Dopo 5 tentativi, l'account viene bloccato.';
+COMMENT ON COLUMN users.account_locked_until IS 'Data e ora fino a quando l'account è bloccato dopo troppi tentativi di login falliti.';
 COMMENT ON TABLE activation_codes IS 'Codici di attivazione generati dal backoffice per supervisori/operai. Pattern XXX-XXX-XXX.';
 COMMENT ON TABLE audit_log IS 'Audit partizionato per anno. Inserimenti via trigger log_entity_changes().';
 COMMENT ON TABLE export_history IS 'Storico dei file esportati (PDF/XLSX/CSV/JSON) per timeline e audit reporting.';
-COMMENT ON FUNCTION consume_activation_code_and_create_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) IS 'Consuma un activation code e crea l''utente con ruolo coerente al codice in un''unica transazione. Ritorna user_id.';
+COMMENT ON FUNCTION consume_activation_code_and_create_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) IS 'Consuma un activation code e crea l'utente con ruolo coerente al codice in un'unica transazione. Ritorna user_id.';
 
 -- ====================================
 -- 7) NOTE OPERATIVE
 -- ====================================
 
 /*
-Impostare all'inizio di ogni richiesta HTTP:
-BEGIN;
-SET LOCAL app.current_company_id = '<UUID-azienda>';
-SET LOCAL app.current_user_id = '<UUID-utente>';
--- ... query ...
-COMMIT;
-
 Per la gestione della sicurezza login:
 - Utilizzare la funzione handle_failed_login() dopo ogni tentativo fallito
 - Utilizzare reset_login_attempts() dopo ogni login riuscito
