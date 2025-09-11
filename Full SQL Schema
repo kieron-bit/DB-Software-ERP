@@ -247,7 +247,7 @@ CREATE INDEX idx_password_resets_expiry ON password_resets(expires_at) WHERE NOT
 -- 2) AUDIT LOG (partizionato)
 -- ====================================
 
--- 2.1 Tabella partizionata per serie temporali
+-- 2.1 Tabella partizionata per serie temporali -- per creare uno storico
 CREATE TABLE audit_log (
     id UUID DEFAULT gen_random_uuid(),
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -276,9 +276,9 @@ BEGIN
 END$$;
 
 -- Indici
-CREATE INDEX IF NOT EXISTS idx_audit_entity_btree ON audit_log(entity_type, entity_id);
-CREATE INDEX IF NOT EXISTS idx_audit_timestamp_brin ON audit_log USING BRIN(timestamp);
-CREATE INDEX IF NOT EXISTS idx_audit_old_gin ON audit_log USING GIN(old_value);
+CREATE INDEX IF NOT EXISTS idx_audit_entity_btree ON audit_log(entity_type, entity_id); --  per cercare rapidamente tutte le modifiche fatte a una certa entità
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp_brin ON audit_log USING BRIN(timestamp); --  per filtrare le modifiche per intervalli di tempo
+CREATE INDEX IF NOT EXISTS idx_audit_old_gin ON audit_log USING GIN(old_value); -- capire chi ha mo
 CREATE INDEX IF NOT EXISTS idx_audit_new_gin ON audit_log USING GIN(new_value);
 
 -- 2.2 Funzione trigger generica
@@ -554,7 +554,7 @@ EXECUTE FUNCTION check_failed_login_attempts();
 -- 4) VISTE
 -- ====================================
 
--- 4.1 Saldo fatture
+-- 4.1 Saldo fatture -- test di logica semplice, invalutazione se le logiche di calcolo meglio lasciare all'esterno del DB
 CREATE OR REPLACE VIEW invoices_balance AS
 SELECT i.*, (i.importo_dovuto - i.importo_pagato) AS residuo
 FROM invoices i;
@@ -567,7 +567,7 @@ WHERE data BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE
 GROUP BY company_id;
 
 -- ====================================
--- 5) RLS (Row Level Security)
+-- 5) RLS (Row Level Security)   -- per separazione di base
 -- ====================================
 
 -- Abilita RLS sulle tabelle multi-tenant
@@ -656,18 +656,7 @@ COMMENT ON TABLE export_history IS 'Storico dei file esportati (PDF/XLSX/CSV/JSO
 COMMENT ON FUNCTION consume_activation_code_and_create_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) IS 'Consuma un activation code e crea l'utente con ruolo coerente al codice in un'unica transazione. Ritorna user_id.';
 
 -- ====================================
--- 7) NOTE OPERATIVE
--- ====================================
-
-/*
-Per la gestione della sicurezza login:
-- Utilizzare la funzione handle_failed_login() dopo ogni tentativo fallito
-- Utilizzare reset_login_attempts() dopo ogni login riuscito
-- Implementare un meccanismo di sblocco manuale con unlock_user_account()
-*/
-
--- ====================================
--- 8) INDICI AGGIUNTIVI
+-- 7) INDICI AGGIUNTIVI
 -- ====================================
 
 CREATE INDEX idx_users_username ON users(username);
