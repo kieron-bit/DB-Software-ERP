@@ -11,7 +11,7 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements; -- telemetria/monitoring (opz
 -- 1) TABELLE CORE
 -- ====================================
 
--- 1.1 Aziende (tenant)
+-- 1.1 Aziende
 CREATE TABLE companies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nome VARCHAR(255) NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE companies (
     cap VARCHAR(20),
     provincia VARCHAR(50),
     telefono VARCHAR(30),
-    logo_url VARCHAR(500)
+    logo_url VARCHAR(500) -- Nuova linea logo url per creazione di buste paga con il logo aziendale o fatture con il logo aziendale
     email_amministrativa VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -80,7 +80,7 @@ CREATE UNIQUE INDEX idx_users_activation_code_unique ON users(activation_code_id
 CREATE TABLE user_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    jwt_token_id VARCHAR(255) NOT NULL,
+    jwt_token_id VARCHAR(255) NOT NULL, -- scelto l'ID sopra al token stesso per questioni di sicurezza e segmentazione 
     valid BOOLEAN NOT NULL DEFAULT TRUE,
     device_id VARCHAR(256),
     long_term_token BOOLEAN DEFAULT FALSE,
@@ -120,7 +120,7 @@ CREATE TABLE work_hours (
     inserito_da UUID REFERENCES users(id),
     data DATE NOT NULL,
     ore_totali NUMERIC(4,2) NOT NULL CHECK (ore_totali BETWEEN 0 AND 24),
-    is_festivo BOOLEAN NOT NULL,
+    is_festivo BOOLEAN NOT NULL, -- per poter permettere di calcolare sulle buste paga le ore supplementari 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (project_id, user_id, data)
 );
@@ -139,12 +139,12 @@ CREATE TABLE photos (
     taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     url TEXT NOT NULL,
     status VARCHAR(20) DEFAULT 'attivo' CHECK (status IN ('attivo', 'archiviato')),
-    note TEXT
+    note TEXT -- sto valutando se creare una Tabella specifica alle note e creare un link con quella delle foto 
 );
 
 CREATE INDEX idx_photos_project_taken ON photos(project_id, taken_at);
 
--- 1.9 Fatture
+-- 1.9 Fatture -- questo era giusto un test per semplici logiche, in fase di costruire qualcosa di più complesso
 CREATE TABLE invoices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
