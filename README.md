@@ -8,15 +8,16 @@ I continuously refine it in collaboration with an expert from the construction S
 
 The goal is to design a solution that is:
 
-Simple and intuitive for everyday use,
+  Simple and intuitive for everyday use,
 
-Accessible across platforms:
+  Accessible across platforms:
 
-Mobile (PWA) for workers on construction sites,
+  Mobile (PWA) for workers on construction sites,
 
-Desktop / Backoffice for project and company managers,
+  Desktop / Backoffice for project and company managers,
 
-Scalable and secure, with strong foundations for multi-company usage.
+  Scalable and secure, with strong foundations for multi-company usage.
+
 
 I began by sketching the user experience on paper, focusing on seamless workflows. Once the main components were clear, I designed the database schema as the backbone of the system.
 
