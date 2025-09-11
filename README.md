@@ -21,7 +21,7 @@ Scalable and secure, with strong foundations for multi-company usage.
 I began by sketching the user experience on paper, focusing on seamless workflows. Once the main components were clear, I designed the database schema as the backbone of the system.
 
 
-🔑 Main Features So Far
+Main Features So Far
 
 Multi-company support (separation of data per company).
 
@@ -35,13 +35,29 @@ Finance management (invoices, balances, payments).
 
 Export and reporting (data history, file generation).
 
-📌 Project Status
+
+Roadmap
+
+At the moment, I am focusing on improving the Notes module based on user feedback, making it more intuitive and useful for day-to-day project communication. 
+
+The next phase will concentrate on finance-related features: 
+
+building a quote creation workflow
+
+developing expense management tools
+
+implementing payslip management. 
+
+
+
+Project Status
 
 This project is ongoing. As I continue learning and experimenting with new features, I regularly expand the schema and refine its design.
 
 It already provides a solid foundation for an ERP system, but it also serves as a learning lab — helping me explore how real-world business logic can be translated into structured, scalable software.
 
-📂 Documentation
+
+Documentation
 
 Full SQL Schema 
 
