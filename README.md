@@ -1,7 +1,10 @@
-DB-Software-ERP-Construction
-PWA Multi-Tenant Database
+DB-Software-ERP: A lightweight ERP designed for SMEs in the construction sector.
 
 This project started as a personal challenge: learning how to code by building an ERP system tailored for construction SMEs.
+
+This project was also developed as a case study for Northern Italian SMEs, where companies often rely on WhatsApp, Excel, and email to manage operations.
+
+I continuously refine it in collaboration with an expert from the construction SME sector, ensuring the solution reflects real-world workflows and remains easy to adopt
 
 The goal is to design a solution that is:
 
@@ -16,6 +19,7 @@ Desktop / Backoffice for project and company managers,
 Scalable and secure, with strong foundations for multi-company usage.
 
 I began by sketching the user experience on paper, focusing on seamless workflows. Once the main components were clear, I designed the database schema as the backbone of the system.
+
 
 🔑 Main Features So Far
 
