@@ -18,7 +18,8 @@ erDiagram
         string cap  ""  
         string provincia  ""  
         string telefono  ""  
-        string email_amministrativa  ""  
+        string email_amministrativa  ""
+        string logo_url  ""
         timestamp created_at  ""  
     }
     users {
