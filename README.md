@@ -32,14 +32,12 @@ Audit and traceability (activity logs, change tracking).
 
 Workforce management (projects, work hours, correction requests).
 
-Finance management (invoices, balances, payments).
-
 Export and reporting (data history, file generation).
 
 
 Roadmap
 
-At the moment, I am focusing on improving the Notes module based on user feedback, making it more intuitive and useful for day-to-day project communication. 
+At the moment, I am focusing on improving the Notes module based on experts feedback, making it more intuitive and useful for day-to-day project communication. 
 
 The next phase will concentrate on finance-related features: 
 
