@@ -161,7 +161,7 @@ CREATE TABLE invoices (
 
 CREATE INDEX idx_invoices_project_scadenza ON invoices(project_id, data_scadenza);
 
--- 1.10 Festività (per azienda)
+-- 1.10 Festività (per azienda) -- logica per indicare alla tabella ore se festivo
 CREATE TABLE holidays (
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     date DATE NOT NULL,
@@ -197,7 +197,7 @@ CREATE TABLE time_correction_requests (
     reviewed_at TIMESTAMPTZ
 );
 
-CREATE TABLE time_correction_history (
+CREATE TABLE time_correction_history ( -- per audit 
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     request_id UUID NOT NULL REFERENCES time_correction_requests(id) ON DELETE CASCADE,
