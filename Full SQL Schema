@@ -1,11 +1,5 @@
 -- PWA Database Schema (Backoffice & Mobile)
--- Versione: Deploy-ready con username e sicurezza login
 
--- ====================================
--- 0) ESTENSIONI
--- ====================================
-CREATE EXTENSION IF NOT EXISTS pgcrypto; -- gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements; -- telemetria/monitoring (opzionale)
 
 -- ====================================
 -- 1) TABELLE CORE
