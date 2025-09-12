@@ -58,6 +58,6 @@ It already provides a solid foundation for an ERP system, but it also serves as 
 
 Documentation
 
-Full SQL Schema 
+Full SQL Schema -> https://github.com/kieron-bit/DB-Software-ERP/blob/main/Full%20SQL%20Schema
 
-Entity-Relationship Diagram (ERD) → [Mermaid Architecture/er-diagram.mmd](https://github.com/kieron-bit/DB-Software-ERP/blob/main/Mermaid%20Architecture)
+Entity-Relationship Diagram (ERD) -> [Mermaid Architecture/er-diagram.mmd](https://github.com/kieron-bit/DB-Software-ERP/blob/main/Mermaid%20Architecture)
