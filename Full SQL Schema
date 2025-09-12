@@ -36,19 +36,18 @@ CREATE TABLE users (
     activation_code_id UUID,
     nome VARCHAR(255),
     cognome VARCHAR(255),
-    username VARCHAR(100) UNIQUE, -- NUOVO CAMPO
+    username VARCHAR(100) UNIQUE, -- NUOVO CAMPO aggiunto nel caso in cui un utente non ha e-mail propria aziendale come identifier
     ruolo VARCHAR(20) NOT NULL CHECK (ruolo IN ('admin', 'supervisore', 'operaio')),
     email VARCHAR(255),
     password_hash VARCHAR(255),
+    jwt_token_id VARCHAR(255),
     status VARCHAR(20) NOT NULL CHECK (status IN ('attivo', 'disattivato', 'eliminato')) DEFAULT 'attivo',
     onboarded BOOLEAN NOT NULL DEFAULT FALSE,
     last_login TIMESTAMP,
     login_attempts INT DEFAULT 0 CHECK (login_attempts >= 0), -- NUOVO: tentativi login falliti
     account_locked_until TIMESTAMP, -- NUOVO: blocco temporaneo account
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(email),
-    UNIQUE(username)
-);
+    );
 
 -- 1.3 Codici di attivazione
 CREATE TABLE activation_codes (
@@ -56,7 +55,6 @@ CREATE TABLE activation_codes (
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     code VARCHAR(11) NOT NULL UNIQUE,
     role VARCHAR(20) NOT NULL CHECK (role IN ('supervisore', 'operaio')),
-    worker_name VARCHAR(255),
     created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL,
@@ -242,87 +240,13 @@ CREATE TABLE password_resets (
 CREATE INDEX idx_password_resets_user ON password_resets(user_id);
 CREATE INDEX idx_password_resets_expiry ON password_resets(expires_at) WHERE NOT used;
 
--- ====================================
--- 2) AUDIT LOG (partizionato)
--- ====================================
 
--- 2.1 Tabella partizionata per serie temporali -- per creare uno storico
-CREATE TABLE audit_log (
-    id UUID DEFAULT gen_random_uuid(),
-    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    user_id UUID,
-    company_id UUID,
-    entity_type VARCHAR(50) NOT NULL,
-    entity_id UUID NOT NULL,
-    operation VARCHAR(10) NOT NULL CHECK (operation IN ('INSERT','UPDATE','DELETE')),
-    old_value JSONB,
-    new_value JSONB,
-    PRIMARY KEY (id, timestamp)
-) PARTITION BY RANGE (timestamp);
-
--- Partizione anno corrente
-DO $$
-DECLARE
-    y INT := EXTRACT(YEAR FROM NOW())::INT;
-    start_ts TIMESTAMPTZ := make_timestamp(y,1,1,0,0,0);
-    end_ts TIMESTAMPTZ := make_timestamp(y+1,1,1,0,0,0);
-    part_name TEXT := format('audit_log_%s', y);
-BEGIN
-    EXECUTE format(
-        'CREATE TABLE IF NOT EXISTS %I PARTITION OF audit_log FOR VALUES FROM (%L) TO (%L);',
-        part_name, start_ts, end_ts
-    );
-END$$;
-
--- Indici
-CREATE INDEX IF NOT EXISTS idx_audit_entity_btree ON audit_log(entity_type, entity_id); --  per cercare rapidamente tutte le modifiche fatte a una certa entità
-CREATE INDEX IF NOT EXISTS idx_audit_timestamp_brin ON audit_log USING BRIN(timestamp); --  per filtrare le modifiche per intervalli di tempo
-CREATE INDEX IF NOT EXISTS idx_audit_old_gin ON audit_log USING GIN(old_value); -- capire chi ha mo
-CREATE INDEX IF NOT EXISTS idx_audit_new_gin ON audit_log USING GIN(new_value);
-
--- 2.2 Funzione trigger generica
-CREATE OR REPLACE FUNCTION log_entity_changes()
-RETURNS TRIGGER AS $$
-DECLARE
-    current_user_id UUID := NULLIF(current_setting('app.current_user_id', true), '')::UUID;
-    resolved_company UUID;
-BEGIN
-    resolved_company := COALESCE(
-        COALESCE(NEW.company_id, OLD.company_id),
-        (SELECT company_id FROM projects p WHERE p.id = COALESCE(NEW.project_id, OLD.project_id)),
-        NULL
-    );
-
-    IF TG_OP = 'INSERT' THEN
-        INSERT INTO audit_log (user_id, company_id, entity_type, entity_id, operation, new_value)
-        VALUES (current_user_id, resolved_company, TG_TABLE_NAME, NEW.id, 'INSERT', to_jsonb(NEW));
-        RETURN NEW;
-    ELSIF TG_OP = 'UPDATE' THEN
-        INSERT INTO audit_log (user_id, company_id, entity_type, entity_id, operation, old_value, new_value)
-        VALUES (current_user_id, resolved_company, TG_TABLE_NAME, NEW.id, 'UPDATE', to_jsonb(OLD), to_jsonb(NEW));
-        RETURN NEW;
-    ELSIF TG_OP = 'DELETE' THEN
-        INSERT INTO audit_log (user_id, company_id, entity_type, entity_id, operation, old_value)
-        VALUES (current_user_id, resolved_company, TG_TABLE_NAME, OLD.id, 'DELETE', to_jsonb(OLD));
-        RETURN OLD;
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
--- 2.3 Trigger di audit
-CREATE TRIGGER trg_audit_users AFTER INSERT OR UPDATE OR DELETE ON users FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
-CREATE TRIGGER trg_audit_projects AFTER INSERT OR UPDATE OR DELETE ON projects FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
-CREATE TRIGGER trg_audit_work_hours AFTER INSERT OR UPDATE OR DELETE ON work_hours FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
-CREATE TRIGGER trg_audit_photos AFTER INSERT OR UPDATE OR DELETE ON photos FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
-CREATE TRIGGER trg_audit_invoices AFTER INSERT OR UPDATE OR DELETE ON invoices FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
-CREATE TRIGGER trg_audit_time_corrections AFTER INSERT OR UPDATE OR DELETE ON time_correction_requests FOR EACH ROW EXECUTE FUNCTION log_entity_changes();
 
 -- ====================================
--- 3) FUNZIONI E TRIGGER BUSINESS
+-- 2) FUNZIONI E TRIGGER BUSINESS
 -- ====================================
 
--- 3.1 Aggiorna flag fattura pagata
+-- 2.1 Aggiorna flag fattura pagata
 CREATE OR REPLACE FUNCTION update_invoice_status()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -335,7 +259,7 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trigger_invoice_status BEFORE INSERT OR UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION update_invoice_status();
 
--- 3.2 Precalcolo festivi su work_hours
+-- 2.2 Precalcolo festivi su work_hours -- per poter dire se è festivo o meno per le fatture 
 CREATE OR REPLACE FUNCTION precompute_holiday()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -353,41 +277,16 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trigger_precompute_holiday BEFORE INSERT ON work_hours FOR EACH ROW EXECUTE FUNCTION precompute_holiday();
 
--- 3.3 Pulizia codici scaduti
-CREATE OR REPLACE FUNCTION clean_expired_activation_codes()
-RETURNS VOID AS $$
-BEGIN
-    UPDATE activation_codes
-    SET status = 'scaduto'
-    WHERE status = 'attivo' AND expires_at < NOW();
-END;
 $$ LANGUAGE plpgsql;
 
--- 3.4 NOTIFY per richieste correzione
-CREATE OR REPLACE FUNCTION notify_supervisors_of_correction_request()
-RETURNS TRIGGER AS $$
-BEGIN
-    PERFORM pg_notify(
-        'correction_request_channel',
-        json_build_object(
-            'request_id', NEW.id,
-            'user_id', NEW.user_id,
-            'project_id', NEW.project_id,
-            'status', NEW.status
-        )::text
-    );
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+-- preferisco metterla nel Back End quella linea 
 
-CREATE TRIGGER trg_notify_correction_request AFTER INSERT OR UPDATE ON time_correction_requests FOR EACH ROW EXECUTE FUNCTION notify_supervisors_of_correction_request();
-
--- 3.5 Funzione per consumare codice attivazione e creare utente
+-- 2.3 Funzione per consumare codice attivazione e creare utente
 CREATE OR REPLACE FUNCTION consume_activation_code_and_create_user(
     p_code TEXT,
     p_nome TEXT,
     p_cognome TEXT,
-    p_username TEXT, -- NUOVO PARAMETRO
+    p_username TEXT, -- NUOVO PARAMETRO introdotto per facilitare accesso se un utente non ha la sua mail di lavoro ma hanno una comune 
     p_email TEXT,
     p_password_hash TEXT
 )
@@ -408,7 +307,7 @@ BEGIN
     END IF;
 
     -- Validazioni per ruolo
-    IF v_code.role = 'operaio' THEN
+    IF v_code.role = 'operaio' THEN -- idea che l'operaio è identificato dal 
         IF p_email IS NOT NULL OR p_password_hash IS NOT NULL OR p_username IS NOT NULL THEN
             RETURN QUERY SELECT false, NULL, 'Gli operai non devono impostare email, password o username in attivazione';
             RETURN;
@@ -436,7 +335,7 @@ BEGIN
         p_email, p_password_hash, 'attivo', TRUE
     );
 
-    -- Marca il codice come utilizzato
+    -- Marca il codice come utilizzato per evitare duplicati 
     UPDATE activation_codes SET status = 'utilizzato' WHERE id = v_code.id;
 
     RETURN QUERY SELECT true, v_user_id, 'Utente creato con successo';
@@ -550,15 +449,15 @@ FOR EACH ROW
 EXECUTE FUNCTION check_failed_login_attempts();
 
 -- ====================================
--- 4) VISTE
+-- 3) VISTE
 -- ====================================
 
--- 4.1 Saldo fatture -- test di logica semplice, invalutazione se le logiche di calcolo meglio lasciare all'esterno del DB
+-- 3.1 Saldo fatture -- test di logica semplice, invalutazione se le logiche di calcolo meglio lasciare all'esterno del DB
 CREATE OR REPLACE VIEW invoices_balance AS
 SELECT i.*, (i.importo_dovuto - i.importo_pagato) AS residuo
 FROM invoices i;
 
--- 4.2 Utenti attivi (ultimi 30 giorni)
+-- 3.2 Utenti attivi (ultimi 30 giorni)
 CREATE OR REPLACE VIEW active_users_report AS
 SELECT company_id, COUNT(DISTINCT user_id) AS active_users
 FROM work_hours
@@ -566,23 +465,22 @@ WHERE data BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE
 GROUP BY company_id;
 
 -- ====================================
--- 5) RLS (Row Level Security)   -- per separazione di base ed evitare che un azienda possa accedere un'altra azienda
+-- 4) RLS (Row Level Security)   -- per separazione di base ed evitare che un'azienda possa accedere un'altra azienda
 -- ====================================
 
 -- Abilita RLS sulle tabelle multi-tenant
-ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_tokens ENABLE ROW LEVEL SECURITY;
-ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE project_supervisors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE work_hours ENABLE ROW LEVEL SECURITY;
-ALTER TABLE photos ENABLE ROW LEVEL SECURITY;
-ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE holidays ENABLE ROW LEVEL SECURITY;
-ALTER TABLE time_correction_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE time_correction_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE export_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE companies ENABLE ROW LEVEL SECURITY; -- per separare le aziende
+ALTER TABLE users ENABLE ROW LEVEL SECURITY; -- per evitare confusione di user
+ALTER TABLE activation_codes ENABLE ROW LEVEL SECURITY; -- per questioni di sicurezza ed evitare doppioni 
+ALTER TABLE user_tokens ENABLE ROW LEVEL SECURITY; -- per motivi di sicurezza 
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY; -- per privacy 
+ALTER TABLE project_supervisors ENABLE ROW LEVEL SECURITY; -- per separare tra aziende 
+ALTER TABLE work_hours ENABLE ROW LEVEL SECURITY; -- per separare
+ALTER TABLE photos ENABLE ROW LEVEL SECURITY; -- per separare
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY; -- per privacy 
+ALTER TABLE time_correction_requests ENABLE ROW LEVEL SECURITY; -- per separare
+ALTER TABLE time_correction_history ENABLE ROW LEVEL SECURITY; -- per separare 
+ALTER TABLE export_history ENABLE ROW LEVEL SECURITY; -- contiene molti dati per privacy 
 
 -- Policy per companies
 CREATE POLICY companies_isolation_policy ON companies USING (id = current_setting('app.current_company_id')::UUID);
@@ -619,9 +517,6 @@ CREATE POLICY photos_isolation_policy ON photos USING (company_id = current_sett
 -- Policy per invoices
 CREATE POLICY invoices_isolation_policy ON invoices USING (company_id = current_setting('app.current_company_id')::UUID);
 
--- Policy per holidays
-CREATE POLICY holidays_isolation_policy ON holidays USING (company_id = current_setting('app.current_company_id')::UUID);
-
 -- Policy per time_correction_requests
 CREATE POLICY tcr_isolation_policy ON time_correction_requests USING (company_id = current_setting('app.current_company_id')::UUID);
 
@@ -641,7 +536,7 @@ CREATE POLICY failed_logins_isolation_policy ON failed_logins USING (
 );
 
 -- ====================================
--- 6) COMMENTI (documentazione inline)
+-- 5) COMMENTI (documentazione inline)
 -- ====================================
 
 COMMENT ON TABLE companies IS 'Tenant multi-azienda. Ogni record identifica un''azienda.';
@@ -649,17 +544,15 @@ COMMENT ON COLUMN users.onboarded IS 'TRUE quando l'utente ha completato il prim
 COMMENT ON COLUMN users.username IS 'Nome utente univoco per l'accesso al sistema. Obbligatorio per admin e supervisori, NULL per operai.';
 COMMENT ON COLUMN users.login_attempts IS 'Numero di tentativi di login falliti consecutivi. Dopo 5 tentativi, l'account viene bloccato.';
 COMMENT ON COLUMN users.account_locked_until IS 'Data e ora fino a quando l'account è bloccato dopo troppi tentativi di login falliti.';
-COMMENT ON TABLE activation_codes IS 'Codici di attivazione generati dal backoffice per supervisori/operai. Pattern XXX-XXX-XXX.';
-COMMENT ON TABLE audit_log IS 'Audit partizionato per anno. Inserimenti via trigger log_entity_changes().';
-COMMENT ON TABLE export_history IS 'Storico dei file esportati (PDF/XLSX/CSV/JSON) per timeline e audit reporting.';
+COMMENT ON TABLE activation_codes IS 'Codici di attivazione generati dal backoffice per supervisori/operai. Pattern XXX-XXX-XXX. sono alfanumeri"
+COMMENT ON TABLE export_history IS 'Storico dei file esportati (PDF/XLSX/CSV) per timeline e audit reporting.';
 COMMENT ON FUNCTION consume_activation_code_and_create_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) IS 'Consuma un activation code e crea l'utente con ruolo coerente al codice in un'unica transazione. Ritorna user_id.';
 
 -- ====================================
--- 7) INDICI AGGIUNTIVI
+-- 6) INDICI AGGIUNTIVI
 -- ====================================
 
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_users_login_attempts ON users(login_attempts);
-CREATE INDEX idx_users_account_lock ON users(account_locked_until);
-CREATE INDEX idx_failed_logins_username ON failed_logins(username_attempted);
-CREATE INDEX idx_failed_logins_timestamp ON failed_logins(timestamp);
+CREATE INDEX idx_users_username ON users(username); -- per poter creare cartella con tutti gli utenti e aver un overview
+CREATE INDEX idx_users_login_attempts ON users(login_attempts); -- per noi, per vedere se c'è stato un tentativo di attacco brute force o se è stata un semplice errore 
+CREATE INDEX idx_failed_logins_username ON failed_logins(username_attempted); -- per motivo sopra citato
+CREATE INDEX idx_failed_logins_timestamp ON failed_logins(timestamp); -- per motivo sopracitato 
