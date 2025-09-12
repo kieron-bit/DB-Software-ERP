@@ -24,15 +24,15 @@ I began by sketching the user experience on paper, focusing on seamless workflow
 
 # Main Features So Far
 
-Multi-company support (separation of data per company).
+ - Multi-company support (separation of data per company).
 
-User management with roles (admin, supervisor, worker) and activation codes.
+ - User management with roles (admin, supervisor, worker) and activation codes.
 
-Audit and traceability (activity logs, change tracking).
+ - Audit and traceability (activity logs, change tracking).
 
-Workforce management (projects, work hours, correction requests).
+ - Workforce management (projects, work hours, correction requests).
 
-Export and reporting (data history, file generation).
+ - Export and reporting (data history, file generation).
 
 
 # Roadmap
