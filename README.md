@@ -60,4 +60,4 @@ Documentation
 
 Full SQL Schema 
 
-Entity-Relationship Diagram (ERD) → Mermaid Architecture/er-diagram.mmd
+Entity-Relationship Diagram (ERD) → [Mermaid Architecture/er-diagram.mmd](https://github.com/kieron-bit/DB-Software-ERP/blob/main/Mermaid%20Architecture)
