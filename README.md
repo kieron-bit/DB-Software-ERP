@@ -1,4 +1,4 @@
-DB-Software-ERP: A lightweight ERP designed for SMEs in the construction sector.
+# DB-Software-ERP: A lightweight ERP designed for SMEs in the construction sector.
 
 This project started as a personal challenge: learning how to code by building an ERP system tailored for construction SMEs.
 
