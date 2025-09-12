@@ -271,8 +271,6 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trigger_precompute_holiday BEFORE INSERT ON work_hours FOR EACH ROW EXECUTE FUNCTION precompute_holiday();
 
-$$ LANGUAGE plpgsql;
-
 -- preferisco metterla nel Back End quella linea 
 
 -- 2.3 Funzione per consumare codice attivazione e creare utente
