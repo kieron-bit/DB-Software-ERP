@@ -8,15 +8,15 @@ I continuously refine it in collaboration with an expert from the construction S
 
 The goal is to design a solution that is:
 
-  Simple and intuitive for everyday use,
+  - Simple and intuitive for everyday use,
 
-  Accessible across platforms:
+  - Accessible across platforms:
 
-  Mobile (PWA) for workers on construction sites,
+  - Mobile (PWA) for workers on construction sites,
 
-  Desktop / Backoffice for project and company managers,
+  - Desktop / Backoffice for project and company managers,
 
-  Scalable and secure, with strong foundations for multi-company usage.
+  - Scalable and secure, with strong foundations for multi-company usage.
 
 
 I began by sketching the user experience on paper, focusing on seamless workflows. Once the main components were clear, I designed the database schema as the backbone of the system.
@@ -41,11 +41,11 @@ At the moment, I am focusing on improving the Notes module based on experts feed
 
 The next phase will concentrate on finance-related features: 
 
-building a quote creation workflow
+- Building a quote creation workflow
 
-developing expense management tools
+- Developing expense management tools
 
-implementing payslip management. 
+- Implementing payslip management. 
 
 
 
