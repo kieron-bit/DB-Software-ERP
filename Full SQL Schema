@@ -240,7 +240,7 @@ CREATE INDEX idx_password_resets_expiry ON password_resets(expires_at) WHERE NOT
 -- 2) FUNZIONI E TRIGGER BUSINESS
 -- ====================================
 
--- 2.1 Aggiorna flag fattura pagata
+-- 2.1 Aggiorna flag fattura pagata  -- per testare le logiche 
 CREATE OR REPLACE FUNCTION update_invoice_status()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -253,7 +253,7 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trigger_invoice_status BEFORE INSERT OR UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION update_invoice_status();
 
--- 2.2 Precalcolo festivi su work_hours -- per poter dire se è festivo o meno per le fatture 
+-- 2.2 Precalcolo festivi su work_hours -- per poter dire se è festivo o meno per le buste paga e nel calcolo delle ore di lavoro 
 CREATE OR REPLACE FUNCTION precompute_holiday()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -298,13 +298,13 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Validazioni per ruolo
-    IF v_code.role = 'operaio' THEN -- idea che l'operaio è identificato dal 
+    -- 2.4 Validazioni per ruolo
+    IF v_code.role = 'operaio' THEN -- idea che l'operaio è identificato dal token
         IF p_email IS NOT NULL OR p_password_hash IS NOT NULL OR p_username IS NOT NULL THEN
             RETURN QUERY SELECT false, NULL, 'Gli operai non devono impostare email, password o username in attivazione';
             RETURN;
         END IF;
-    ELSIF v_code.role = 'supervisore' THEN
+    ELSIF v_code.role = 'supervisore' THEN -- supervisore e Admin identificato da username
         IF p_email IS NULL OR p_password_hash IS NULL OR p_username IS NULL THEN
             RETURN QUERY SELECT false, NULL, 'Email, username e password sono obbligatorie per i supervisori';
             RETURN;
@@ -314,7 +314,7 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Inserimento utente collegato al codice
+    -- 2.5 Inserimento utente collegato al codice
     v_user_id := gen_random_uuid();
     
     INSERT INTO users (
@@ -336,7 +336,7 @@ EXCEPTION WHEN others THEN
 END;
 $$ LANGUAGE plpgsql;
 
--- 3.6 Funzioni per gestione sicurezza login
+-- 2.6 Funzioni per gestione sicurezza login
 CREATE OR REPLACE FUNCTION handle_failed_login(p_username VARCHAR)
 RETURNS TABLE(is_locked BOOLEAN, attempts_left INT, lock_until TIMESTAMP) AS $$
 DECLARE
