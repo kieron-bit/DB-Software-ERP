@@ -31,7 +31,7 @@ CREATE TABLE users (
     nome VARCHAR(255),
     cognome VARCHAR(255),
     username VARCHAR(100) UNIQUE, -- NUOVO CAMPO aggiunto nel caso in cui un utente non ha e-mail propria aziendale come identifier
-    ruolo VARCHAR(20) NOT NULL CHECK (ruolo IN ('admin', 'supervisore', 'operaio')),
+    ruolo VARCHAR(20) NOT NULL CHECK (ruolo IN ('admin', 'supervisore', 'operaio', 'capocantiere')), -- parlando con specialista c'è bisogno di distinguere capocantiere/supervisore
     email VARCHAR(255),
     password_hash VARCHAR(255),
     jwt_token_id VARCHAR(255),
@@ -48,7 +48,7 @@ CREATE TABLE activation_codes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     code VARCHAR(11) NOT NULL UNIQUE,
-    role VARCHAR(20) NOT NULL CHECK (role IN ('supervisore', 'operaio')),
+    role VARCHAR(20) NOT NULL CHECK (role IN ('supervisore', 'operaio', 'capocantiere', 'admin')),
     created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL,
@@ -61,8 +61,13 @@ ALTER TABLE users ADD CONSTRAINT fk_users_activation_code FOREIGN KEY (activatio
 
 -- Requisiti credenziali per ruoli
 ALTER TABLE users ADD CONSTRAINT role_requirements CHECK (
-    (ruolo = 'operaio' AND email IS NULL AND password_hash IS NULL AND username IS NULL) OR
+    (ruolo IN ('capocantiere','operaio')  AND email IS NULL AND password_hash IS NULL AND username IS NULL) OR
     (ruolo IN ('admin','supervisore') AND email IS NOT NULL AND password_hash IS NOT NULL AND username IS NOT NULL)
+);
+
+ALTER TABLE users ADD CONSTRAINT role_requirements CHECK (
+    (ruolo IN ('capocantiere','operaio')  AND jwt_token_id IS NOT NULL) OR
+    (ruolo IN ('admin','supervisore') AND jwt_token_id IS NULL)
 );
 
 CREATE INDEX idx_users_company ON users(company_id);
@@ -102,7 +107,17 @@ CREATE TABLE project_supervisors (
     PRIMARY KEY (project_id, user_id)
 );
 
--- 1.7 Ore lavorate
+-- 1.7 Capocantiere per progetto
+CREATE TABLE project_foreman (
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (project_id, user_id)
+);
+
+
+
+
+-- 1.8 Ore lavorate
 CREATE TABLE work_hours (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -120,7 +135,7 @@ CREATE INDEX idx_work_hours_project_date ON work_hours(project_id, data);
 CREATE INDEX idx_work_hours_festivo ON work_hours(is_festivo);
 CREATE INDEX idx_work_hours_user_date ON work_hours(user_id, data);
 
--- 1.8 Foto (con note)
+-- 1.9 Foto (con note)
 CREATE TABLE photos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -135,7 +150,7 @@ CREATE TABLE photos (
 
 CREATE INDEX idx_photos_project_taken ON photos(project_id, taken_at);
 
--- 1.9 Fatture -- questo era giusto un test per semplici logiche, in fase di costruire qualcosa di più complesso
+-- 1.10 Fatture -- questo era giusto un test per semplici logiche, in fase di costruire qualcosa di più complesso
 CREATE TABLE invoices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -152,7 +167,7 @@ CREATE TABLE invoices (
 
 CREATE INDEX idx_invoices_project_scadenza ON invoices(project_id, data_scadenza);
 
--- 1.10 Festività (per azienda) -- logica per indicare alla tabella ore se festivo
+-- 1.11 Festività (per azienda) -- logica per indicare alla tabella ore se festivo
 CREATE TABLE holidays (
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     date DATE NOT NULL,
@@ -160,7 +175,7 @@ CREATE TABLE holidays (
     PRIMARY KEY (company_id, date)
 );
 
--- 1.11 Log attività applicative
+-- 1.12 Log attività applicative
 CREATE TABLE activity_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id),
@@ -172,7 +187,7 @@ CREATE TABLE activity_log (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 1.12 Workflow correzioni ore
+-- 1.13 Workflow correzioni ore
 CREATE TABLE time_correction_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -199,7 +214,7 @@ CREATE TABLE time_correction_history ( -- per audit
     corrected_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- 1.13 Storico export (PDF/XLSX)
+-- 1.14 Storico export (PDF/XLSX)
 CREATE TABLE export_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -212,7 +227,7 @@ CREATE TABLE export_history (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- 1.14 Sicurezza accessi
+-- 1.15 Sicurezza accessi
 CREATE TABLE failed_logins (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username_attempted VARCHAR(255) NOT NULL,
@@ -299,12 +314,12 @@ BEGIN
     END IF;
 
     -- 2.4 Validazioni per ruolo
-    IF v_code.role = 'operaio' THEN -- idea che l'operaio è identificato dal token
+    IF v_code.role = 'operaio','capocantiere' THEN -- idea che l'operaio è identificato dal token
         IF p_email IS NOT NULL OR p_password_hash IS NOT NULL OR p_username IS NOT NULL THEN
             RETURN QUERY SELECT false, NULL, 'Gli operai non devono impostare email, password o username in attivazione';
             RETURN;
         END IF;
-    ELSIF v_code.role = 'supervisore' THEN -- supervisore e Admin identificato da username
+    ELSIF v_code.role = 'supervisore','admin' THEN -- supervisore e Admin identificato da username
         IF p_email IS NULL OR p_password_hash IS NULL OR p_username IS NULL THEN
             RETURN QUERY SELECT false, NULL, 'Email, username e password sono obbligatorie per i supervisori';
             RETURN;
@@ -321,7 +336,7 @@ BEGIN
         id, company_id, activation_code_id, nome, cognome, username,
         ruolo, email, password_hash, status, onboarded
     ) VALUES (
-        v_user_id, v_code.company_id, v_code.id,
+        v_user_id, v_code.company_id, v_code.id, -- da rivisitare Admin e capocantiere non ci sono, da corregere
         COALESCE(p_nome, v_code.worker_name), p_cognome, p_username,
         CASE WHEN v_code.role = 'operaio' THEN 'operaio' ELSE 'supervisore' END,
         p_email, p_password_hash, 'attivo', TRUE
