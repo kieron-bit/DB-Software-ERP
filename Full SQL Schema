@@ -227,6 +227,22 @@ CREATE TABLE export_history (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+
+-- 1.15 Materiali -- NEW! -- in lavorazione
+
+CREATE TABLE materials (
+id UUID PRIMARY KEY DEFAULT gen_randonm_uuid(),
+company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+materials VARCHAR(100),
+unit VARCHAR (20),
+quantity VARCHAR (1000),
+location_id   , -- devo creare tabella location da dare come referenza per i magazzini 
+consumable BOOLEAN DEFAULT FALSE,  -- attrezzatura vs materiale di costruzione
+internal_code VARCHAR(50)
+);
+
+
+
 -- 1.15 Sicurezza accessi
 CREATE TABLE failed_logins (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
