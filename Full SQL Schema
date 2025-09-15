@@ -228,19 +228,37 @@ CREATE TABLE export_history (
 );
 
 
--- 1.15 Materiali -- NEW! -- in lavorazione
+-- 1.15 Materiali consumabili -- NEW!,  in lavorazione
 
-CREATE TABLE materials (
+CREATE TABLE materials_consumables (
 id UUID PRIMARY KEY DEFAULT gen_randonm_uuid(),
 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
 materials VARCHAR(100),
 unit VARCHAR (20),
 quantity VARCHAR (1000),
-location_id   , -- devo creare tabella location da dare come referenza per i magazzini 
-consumable BOOLEAN DEFAULT FALSE,  -- attrezzatura vs materiale di costruzione
+location_id UUID REFERENCES locations(id) ON DELETE SET NULL, -- devo creare tabella location da dare come referenza per i magazzini 
 internal_code VARCHAR(50)
 );
 
+CREATE INDEX idx_materials_consumables_company ON materials(company_id);
+CREATE INDEX idx_materials_consumables_location ON materials(location_id);
+
+
+-- 1.16 Materiali non consumabili -- Attrezzi, ecc., deciso di dividerli per la logica quando i materiali sono a zero
+
+CREATE TABLE materials_non_consumables (
+id UUID PRIMARY KEY DEFAULT gen_randonm_uuid(),
+company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+materials VARCHAR(100),
+unit VARCHAR (20),
+quantity VARCHAR (1000),
+status VARCHAR(20) NOT NULL CHECK (status IN ('operativo,'rotto','in riparazione','perso')) DEFAULT 'operativo',
+location_id UUID REFERENCES locations(id) ON DELETE SET NULL, -- devo creare tabella location da dare come referenza per i magazzini 
+internal_code VARCHAR(50)
+);
+
+CREATE INDEX idx_materials_non_consumable_company ON materials(company_id);
+CREATE INDEX idx_materials_non_consumable_location ON materials(location_id);
 
 
 -- 1.15 Sicurezza accessi
