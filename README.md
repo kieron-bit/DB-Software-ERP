@@ -26,7 +26,7 @@ I began by sketching the user experience on paper, focusing on seamless workflow
 
  - Multi-company support (separation of data per company).
 
- - User management with roles (admin, supervisor, worker) and activation codes.
+ - User management with roles (admin, supervisor, worker, foreman) and activation codes.
 
  - Audit and traceability (activity logs, change tracking).
 
