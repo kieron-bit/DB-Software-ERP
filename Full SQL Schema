@@ -231,17 +231,18 @@ CREATE TABLE export_history (
 -- 1.15 Materiali consumabili -- NEW!,  in lavorazione
 
 CREATE TABLE materials_consumables (
-id UUID PRIMARY KEY DEFAULT gen_randonm_uuid(),
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
 materials VARCHAR(100),
 unit VARCHAR (20),
-quantity VARCHAR (1000),
+quantity NUMERIC NOT NULL DEFAULT 0 CHECK (quantity >= 0)
 location_id UUID REFERENCES locations(id) ON DELETE SET NULL, -- devo creare tabella location da dare come referenza per i magazzini 
+status VARCHAR(20) NOT NULL CHECK (status IN ('in stock','ordinato','assente')) DEFAULT 'in stock',
 internal_code VARCHAR(50)
 );
 
-CREATE INDEX idx_materials_consumables_company ON materials(company_id);
-CREATE INDEX idx_materials_consumables_location ON materials(location_id);
+CREATE INDEX idx_materials_consumables_company ON materials_consumables(company_id);
+CREATE INDEX idx_materials_consumables_location ON materials_consumables(location_id);
 
 
 -- 1.16 Materiali non consumabili -- Attrezzi, ecc., deciso di dividerli per la logica quando i materiali sono a zero
@@ -251,17 +252,16 @@ id UUID PRIMARY KEY DEFAULT gen_randonm_uuid(),
 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
 materials VARCHAR(100),
 unit VARCHAR (20),
-quantity VARCHAR (1000),
-status VARCHAR(20) NOT NULL CHECK (status IN ('operativo,'rotto','in riparazione','perso')) DEFAULT 'operativo',
+quantity NUMERIC NOT NULL DEFAULT 0 CHECK (quantity >= 0)
+status VARCHAR(20) NOT NULL CHECK (status IN ('operativo,'rotto','in riparazione','perso', 'ordinato')) DEFAULT 'operativo',
 location_id UUID REFERENCES locations(id) ON DELETE SET NULL, -- devo creare tabella location da dare come referenza per i magazzini 
 internal_code VARCHAR(50)
 );
 
-CREATE INDEX idx_materials_non_consumable_company ON materials(company_id);
-CREATE INDEX idx_materials_non_consumable_location ON materials(location_id);
+CREATE INDEX idx_materials_non_consumables_company ON materials_non_consumables(company_id);
+CREATE INDEX idx_materials_non_consumables_location ON materials_non_consumables(location_id);
 
-
--- 1.15 Sicurezza accessi
+-- 1.17 Sicurezza accessi
 CREATE TABLE failed_logins (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username_attempted VARCHAR(255) NOT NULL,
